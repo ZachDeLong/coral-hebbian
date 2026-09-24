@@ -58,7 +58,17 @@ def test_recall_runs_for_every_scale_mode():
     fp = run_recall(MemoryConfig(), task)
     assert fp.acc_by_age.shape == (32,)
     assert fp.acc_by_age[0] == 1.0  # the latest write reads back cleanly in float
+    assert fp.cos_by_age[0] > 0.5 and fp.write_lsb != fp.write_lsb  # fp32 has no write size (NaN)
     rng = calibrate(MemoryConfig(), task)
     for scale in ("static", "static_row", "dynamic"):
         res = run_recall(MemoryConfig(bits=8, scale=scale), task, static_range=rng)
         assert 0.0 <= res.recalled <= 32
+        assert res.write_lsb > 0
+
+
+def test_write_size_shrinks_with_fewer_bits():
+    task = RecallTask(d=16, T=32, vocab=16, batch=4)
+    rng = calibrate(MemoryConfig(), task)
+    w8 = run_recall(MemoryConfig(bits=8), task, static_range=rng).write_lsb
+    w4 = run_recall(MemoryConfig(bits=4), task, static_range=rng).write_lsb
+    assert abs(w8 / w4 - 127 / 7) < 1e-3 * (127 / 7)  # same writes, 127/7 finer grid

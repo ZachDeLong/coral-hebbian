@@ -67,33 +67,37 @@ def group_by_config(results):
     return groups
 
 
-def write_csvs(results, groups, out: Path):
+def write_csvs(results, groups, T: int, out: Path):
     def cfg_cols(c):
-        return [c.rule, c.lam, c.bits or 32, c.rounding if c.bits else "", c.scale if c.bits else ""]
+        return [T, c.rule, c.lam, c.bits or 32, c.rounding if c.bits else "", c.scale if c.bits else ""]
 
-    cfg_header = ["rule", "lam", "bits", "rounding", "scale"]
+    cfg_header = ["T", "rule", "lam", "bits", "rounding", "scale"]
     with open(out / "sweep.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow([*cfg_header, "seed", "recalled", "age50", "saturated_frac", "unchanged_frac"])
+        w.writerow([*cfg_header, "seed", "recalled", "age50", "fidelity", "write_lsb", "saturated_frac",
+                    "unchanged_frac"])
         for r in results:
-            w.writerow([*cfg_cols(r.cfg), r.seed, f"{r.recalled:.2f}", r.age50(), f"{r.saturated_frac:.4f}",
-                        f"{r.unchanged_frac:.4f}"])
+            w.writerow([*cfg_cols(r.cfg), r.seed, f"{r.recalled:.2f}", r.age50(), f"{r.fidelity:.4f}",
+                        f"{r.write_lsb:.4f}", f"{r.saturated_frac:.4f}", f"{r.unchanged_frac:.4f}"])
     with open(out / "summary.csv", "w", newline="") as f:
         w = csv.writer(f)
         w.writerow([*cfg_header, "n_seeds", "recalled_mean", "recalled_std", "age50_mean", "age50_std",
-                    "unchanged_frac_mean"])
+                    "fidelity_mean", "fidelity_std", "write_lsb_mean", "unchanged_frac_mean"])
         for cfg, rs in groups.items():
             rec = np.array([r.recalled for r in rs])
             a50 = np.array([r.age50() for r in rs])
+            fid = np.array([r.fidelity for r in rs])
             w.writerow([*cfg_cols(cfg), len(rs), f"{rec.mean():.2f}", f"{rec.std():.2f}", f"{a50.mean():.1f}",
-                        f"{a50.std():.1f}", f"{np.mean([r.unchanged_frac for r in rs]):.4f}"])
+                        f"{a50.std():.1f}", f"{fid.mean():.4f}", f"{fid.std():.4f}",
+                        f"{np.mean([r.write_lsb for r in rs]):.4f}", f"{np.mean([r.unchanged_frac for r in rs]):.4f}"])
     with open(out / "curves.csv", "w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["rule", "lam", "label", "age", "acc_mean", "acc_std"])
+        w.writerow(["rule", "lam", "label", "age", "acc_mean", "acc_std", "cos_mean"])
         for cfg, rs in groups.items():
             accs = np.stack([r.acc_by_age for r in rs])
-            for age, (m, s) in enumerate(zip(accs.mean(0), accs.std(0))):
-                w.writerow([cfg.rule, cfg.lam, cfg.label, age, f"{m:.4f}", f"{s:.4f}"])
+            coss = np.stack([r.cos_by_age for r in rs]).mean(0)
+            for age, (m, s, c) in enumerate(zip(accs.mean(0), accs.std(0), coss)):
+                w.writerow([cfg.rule, cfg.lam, cfg.label, age, f"{m:.4f}", f"{s:.4f}", f"{c:.4f}"])
 
 
 def print_table(groups, scale: str, lams, n_seeds: int):
@@ -176,6 +180,7 @@ def main():
     p.add_argument("--seed", type=int, default=0, help="first seed")
     p.add_argument("--seeds", type=int, default=1, help="number of seeds (seed, seed+1, ...)")
     p.add_argument("--beta", type=float, default=1.0)
+    p.add_argument("--lams", type=float, nargs="+", default=None, help=f"decay values (default {LAMS})")
     p.add_argument("--row-scale", action="store_true", help="also run per-row static scales")
     p.add_argument("--quick", action="store_true", help="tiny smoke-test grid")
     p.add_argument("--out", type=Path, default=Path(__file__).resolve().parents[1] / "results")
@@ -187,7 +192,7 @@ def main():
         lams = (0.9, 0.99)
     else:
         task = RecallTask(d=args.d, T=args.T, vocab=args.vocab, batch=args.batch, seed=args.seed)
-        lams = LAMS
+        lams = tuple(args.lams) if args.lams else LAMS
     scales = ("static", "dynamic") + (("static_row",) if args.row_scale else ())
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -196,7 +201,7 @@ def main():
     for seed in range(args.seed, args.seed + args.seeds):
         results += run_grid(replace(task, seed=seed), scales, lams, args.beta)
     groups = group_by_config(results)
-    write_csvs(results, groups, args.out)
+    write_csvs(results, groups, task.T, args.out)
     for scale in scales:
         print_table(groups, scale, lams, args.seeds)
         plot(groups, scale, lams, task, args.seeds, args.out / f"recall_{scale}.png")

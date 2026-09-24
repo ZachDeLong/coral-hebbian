@@ -72,6 +72,7 @@ class FastWeightMemory:
         self.steps = 0
         self._saturated = 0.0
         self._unchanged = 0.0
+        self._write_lsb = 0.0
 
         if cfg.bits is None:
             return
@@ -99,6 +100,8 @@ class FastWeightMemory:
                 # Block floating point: rescale every step so the largest entry hits qmax.
                 self.scale = (S_new.abs().amax(dim=(1, 2), keepdim=True) / qmax(cfg.bits)).clamp_min(_TINY)
             codes = quantize(S_new, self.scale, cfg.bits, cfg.rounding, self.gen)
+            write = S_new - cfg.lam * self.S  # the outer-product term alone, without decay
+            self._write_lsb += (write.abs() / self.scale).mean().item()
             self._saturated += (codes.abs() == qmax(cfg.bits)).float().mean().item()
             self._unchanged += (codes == self.codes).float().mean().item()
             self.codes = codes
@@ -107,6 +110,13 @@ class FastWeightMemory:
 
     def read(self, k: torch.Tensor) -> torch.Tensor:
         return torch.einsum("bij,bj->bi", self.S, k)
+
+    @property
+    def write_lsb(self) -> float:
+        """Mean size of one write per entry, in quantization steps (NaN for float configs)."""
+        if self.cfg.bits is None:
+            return float("nan")
+        return self._write_lsb / max(self.steps, 1)
 
     @property
     def saturated_frac(self) -> float:
