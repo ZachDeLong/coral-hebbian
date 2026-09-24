@@ -34,6 +34,7 @@ class RecallResult:
     acc_by_age: np.ndarray  # (T,), index 0 = most recent write
     saturated_frac: float
     unchanged_frac: float
+    seed: int = 0
 
     @property
     def recalled(self) -> float:
@@ -88,4 +89,5 @@ def run_recall(cfg: MemoryConfig, task: RecallTask, static_range: torch.Tensor |
         acc_by_age=acc_by_time.flip(0).numpy(),
         saturated_frac=mem.saturated_frac,
         unchanged_frac=mem.unchanged_frac,
+        seed=task.seed,
     )
