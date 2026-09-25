@@ -41,7 +41,9 @@ With even slight decay (λ = 0.999), writes stay above about 0.64 steps and INT8
 
 **5. The obvious fixes don't help.** Stochastic rounding is unbiased on average, but its noise costs more than the bias it removes (INT8, 4096 writes: 0.60 of fp32 vs 0.74 for plain rounding). A dynamic scale re-rounds every entry on every step and adds damage of its own.
 
-**What to run on the chip:** delta rule, INT8, and one static scale for the whole state tensor. (The Torq compiler supports INT4 only for weights, not for state like S, so the INT4 results are about low-precision memory in general, not this chip specifically. Its main float path is bf16, which we haven't simulated yet.)
+**6. bf16, the chip's main format, is safe here, and our prediction about it was wrong.** We predicted (and [committed before running](results/bf16/predictions.md)) that bf16's 8-bit mantissa would freeze decay at λ ≥ 0.998. It didn't: bf16 matched fp32 on both tasks at every λ. The prediction ignored the writes. A typical write is 4–15 bf16 rounding steps wide, so rounding errors change from step to step like noise instead of cancelling the decay. It's the write-size rule again: the dead zone only bites when writes are smaller than the rounding step. ([notes](results/bf16/notes.md))
+
+**What to run on the chip:** the delta rule, stored as bf16, or as INT8 with one static scale for the whole state tensor. (The Torq compiler supports INT4 only for weights, not for state like S, so the INT4 results are about low-precision memory in general, not this chip specifically.)
 
 Details, numbers, and caveats: [`results/phase1-notes.md`](results/phase1-notes.md) (recall sweep, 10 seeds), [`results/writesize/notes.md`](results/writesize/notes.md) (write-size test), [`results/rebind/notes.md`](results/rebind/notes.md) (rebinding).
 
@@ -88,7 +90,7 @@ results/                   CSVs, plots, and notes for every run above
 
 ## Next
 
-1. **Simulate bf16 storage**, Torq's main path. bf16 keeps only 8 significant bits, so decay should get stuck when `1-λ` is below about 2⁻⁹ (λ ≳ 0.998).
+1. **Find where bf16 breaks.** Its rounding step is relative to the entry, so writes shrink relative to it as entries grow: very long memories with no decay, or the same association written hundreds of times.
 2. **On the board** ([bring-up checklist](docs/board-bringup.md)): export the update step `(k, v, S) -> (readout, S')` as a static graph, compile it with Synaptics' Torq compiler, and check that the NPU matches the simulation. Rounding, saturation, and requantization differences are findings too.
 3. **Demo:** a camera few-shot learner. Show the Coralboard a new object a few times and it recognizes it afterward, learning with no backprop.
 
