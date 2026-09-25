@@ -18,7 +18,7 @@
    | 4096 | 0.25 | 0.74 | 0.86 |
 
    The decline is gradual, not a sharp cliff. It becomes visible below about 0.7 steps.
-2. **Above about 0.7 steps, everything matches fp32** (ratio 0.98–1.03): INT8 and INT4, Hebbian and delta, every λ and T, with nearest rounding.
+2. **With a static scale and nearest rounding, every config above about 0.64 steps matches fp32** (ratio 0.99–1.03): Hebbian and delta, every λ and T. (No INT4 config ever gets writes that large.) *Corrected 2026-09-24: an earlier version said this held for all scale modes. With a dynamic scale, INT8 is at 0.93–0.98 even at 0.8–1.1 steps; see finding 7.*
 3. **Decay protects INT8.** At λ = 0.999 the state stays bounded, so writes never shrink below about 0.64 steps even at T = 4096, and INT8 holds at 0.99–1.00. Only memories with no decay drift into the danger zone as they grow.
 4. **Delta-rule writes stay large** (≥ 1.7 steps at INT8 for every T tested), because its state is bounded. It never came near the threshold at INT8.
 5. **Below the threshold, write size alone doesn't predict the outcome.** INT4 points at about 0.1–0.2 steps range from 0.12× to 2.25× fp32. λ decides which failure you get. With short λ, stuck decay extends memory (ratio > 1). With long λ, writes vanish (ratio ≪ 1). So the rule predicts *whether* a memory behaves like fp32, but not *how* it fails.
@@ -27,7 +27,7 @@
 
 ## Takeaway (draft)
 
-A fast-weight memory stored in low-precision integers behaves like full precision as long as each write is at least about 0.7 of a quantization step. For INT8 that holds for any memory with decay, and for memories without decay up to about 500–1000 writes at d=128. For INT4 it almost never holds, and the failure mode depends on the decay rate.
+A fast-weight memory stored in low-precision integers with a static scale behaves like full precision as long as each write is at least about 0.6–0.7 of a quantization step. For INT8 that holds for any memory with decay, and for memories without decay up to about 500–1000 writes at d=128. For INT4 it almost never holds, and the failure mode depends on the decay rate.
 
 ## Caveats
 - 3 seeds, d = 128, one task (random keys, codebook decoding).
