@@ -3,3 +3,4 @@ __pycache__/
 .pytest_cache/
 results/quick/
 results/sweep_log.txt
+results/writesize/run_log.txt
