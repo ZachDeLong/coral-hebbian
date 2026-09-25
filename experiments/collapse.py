@@ -36,7 +36,7 @@ def load(paths, metric: str):
     fp = {(r["T"], r["rule"], r["lam"]): float(r[f"{metric}_mean"]) for r in rows if r["bits"] == "32"}
     points = []
     for r in rows:
-        if r["bits"] == "32":
+        if r["rounding"] not in ("nearest", "stochastic"):  # fp32 reference and float formats (bf16)
             continue
         ref = fp[(r["T"], r["rule"], r["lam"])]
         points.append(dict(

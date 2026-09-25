@@ -22,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np  # noqa: E402
 
 from fastweight import MemoryConfig, RebindTask, calibrate_rebind, run_rebind  # noqa: E402
-from sweep import LAMS, PRECISIONS, RULES, plot_curves  # noqa: E402
+from sweep import FLOAT_FORMATS, LAMS, PRECISIONS, RULES, TABLE_COLS, TABLE_NAMES, plot_curves, series_key  # noqa: E402
 
 
 def run_grid(task: RebindTask, scales, lams, beta: float):
@@ -32,6 +32,8 @@ def run_grid(task: RebindTask, scales, lams, beta: float):
             t0 = time.perf_counter()
             base = MemoryConfig(rule=rule, lam=lam, beta=beta)
             results.append(run_rebind(base, task))
+            for fmt in FLOAT_FORMATS:
+                results.append(run_rebind(replace(base, float_format=fmt), task))
             static_range = calibrate_rebind(base, task)
             for bits, rounding in PRECISIONS:
                 for scale in scales:
@@ -101,20 +103,17 @@ def main():
         for c, rs in groups.items():
             cur = np.array([r.current_acc for r in rs])
             stl = np.array([r.stale_rate for r in rs])
-            w.writerow([c.rule, c.lam, c.bits or 32, c.rounding if c.bits else "", c.scale if c.bits else "",
+            w.writerow([c.rule, c.lam, c.bits or c.float_format or 32, c.rounding if c.bits else "", c.scale if c.bits else "",
                         len(rs), f"{cur.mean():.4f}", f"{cur.std():.4f}", f"{stl.mean():.4f}", f"{stl.std():.4f}",
                         f"{np.mean([r.write_lsb for r in rs]):.4f}", f"{np.mean([r.unchanged_frac for r in rs]):.4f}"])
 
     edges = age_bins(task.T)
-    cols = ["fp32", *PRECISIONS]
-    names = ["fp32"] + [f"int{b} {rd}" for b, rd in PRECISIONS]
+    cols, names = TABLE_COLS, TABLE_NAMES
     for scale in scales:
         pick = {}
         for c, rs in groups.items():
-            if c.bits is None:
-                pick[(c.rule, c.lam, "fp32")] = rs
-            elif c.scale == scale:
-                pick[(c.rule, c.lam, (c.bits, c.rounding))] = rs
+            if c.bits is None or c.scale == scale:
+                pick[(c.rule, c.lam, series_key(c))] = rs
         print(f"\nCurrent accuracy / stale rate (%), scale={scale}, {args.seeds} seed(s)")
         print("| rule | lam | " + " | ".join(names) + " |")
         print("|---|---|" + "---|" * len(cols))

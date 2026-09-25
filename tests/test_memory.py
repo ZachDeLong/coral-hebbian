@@ -77,6 +77,18 @@ def test_recall_runs_for_every_scale_mode():
         assert res.write_lsb > 0
 
 
+def test_bf16_decay_sticks_when_one_minus_lambda_is_below_half_ulp():
+    # bf16 keeps 8 significant bits, so round(0.999*s) == s for every s (1-0.999 < 2^-9), but 0.99 decays.
+    d = 8
+    k, v = torch.zeros(1, d), torch.zeros(1, d)
+    for lam, sticks in ((0.999, True), (0.99, False)):
+        mem = FastWeightMemory(MemoryConfig(lam=lam, float_format="bf16"), batch=1, d=d)
+        mem.S = torch.randn(1, d, d, generator=torch.Generator().manual_seed(0)).to(torch.bfloat16).float()
+        before = mem.S.clone()
+        mem.write(k, v)
+        assert torch.equal(mem.S, before) == sticks
+
+
 def test_rebind_scoring_current_and_stale():
     from fastweight.rebind import score
 

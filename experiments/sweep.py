@@ -30,17 +30,39 @@ from fastweight import MemoryConfig, RecallTask, calibrate, run_recall  # noqa: 
 RULES = ("hebbian", "delta")
 LAMS = (0.9, 0.97, 0.99, 0.999, 1.0)
 PRECISIONS = ((8, "nearest"), (8, "stochastic"), (4, "nearest"), (4, "stochastic"))
+FLOAT_FORMATS = ("bf16",)  # float storage formats; like fp32, they have no scale and appear in every scale's table
 
-# Reference palette slots 1-4 (validated adjacent, light surface), fp32 in primary ink.
-# Rounding is double-encoded as line style so identity never rests on color alone.
+# Reference palette slots 1-5 (validated adjacent, light surface), fp32 in primary ink.
+# Rounding / format is double-encoded as line style so identity never rests on color alone.
 STYLE = {
     "fp32": dict(color="#0b0b0b", ls="-"),
     (8, "nearest"): dict(color="#2a78d6", ls="-"),
     (8, "stochastic"): dict(color="#eb6834", ls="--"),
     (4, "nearest"): dict(color="#1baf7a", ls="-"),
     (4, "stochastic"): dict(color="#eda100", ls="--"),
+    "bf16": dict(color="#e87ba4", ls=":"),
 }
 INK_2, MUTED, GRID, AXIS, SURFACE = "#52514e", "#898781", "#e1e0d9", "#c3c2b7", "#fcfcfb"
+
+
+def series_key(cfg: MemoryConfig):
+    """Identity of a line in the plots and a column in the tables."""
+    if cfg.bits is None:
+        return cfg.float_format or "fp32"
+    return (cfg.bits, cfg.rounding)
+
+
+def series_label(cfg: MemoryConfig) -> str:
+    key = series_key(cfg)
+    if key == "fp32":
+        return "fp32 (reference)"
+    if isinstance(key, str):
+        return f"{key} storage"
+    return f"int{cfg.bits}, {cfg.rounding} rounding"
+
+
+TABLE_COLS = ["fp32", *FLOAT_FORMATS, *PRECISIONS]
+TABLE_NAMES = ["fp32", *FLOAT_FORMATS] + [f"int{b} {rd}" for b, rd in PRECISIONS]
 
 
 def run_grid(task: RecallTask, scales, lams, beta: float):
@@ -50,6 +72,8 @@ def run_grid(task: RecallTask, scales, lams, beta: float):
             t0 = time.perf_counter()
             base = MemoryConfig(rule=rule, lam=lam, beta=beta)
             results.append(run_recall(base, task))
+            for fmt in FLOAT_FORMATS:
+                results.append(run_recall(replace(base, float_format=fmt), task))
             static_range = calibrate(base, task)
             for bits, rounding in PRECISIONS:
                 for scale in scales:
@@ -69,7 +93,8 @@ def group_by_config(results):
 
 def write_csvs(results, groups, T: int, out: Path):
     def cfg_cols(c):
-        return [T, c.rule, c.lam, c.bits or 32, c.rounding if c.bits else "", c.scale if c.bits else ""]
+        bits = c.bits or c.float_format or 32
+        return [T, c.rule, c.lam, bits, c.rounding if c.bits else "", c.scale if c.bits else ""]
 
     cfg_header = ["T", "rule", "lam", "bits", "rounding", "scale"]
     with open(out / "sweep.csv", "w", newline="") as f:
@@ -103,12 +128,9 @@ def write_csvs(results, groups, T: int, out: Path):
 def print_table(groups, scale: str, lams, n_seeds: int):
     by_key = {}
     for cfg, rs in groups.items():
-        if cfg.bits is None:
-            by_key[(cfg.rule, cfg.lam, "fp32")] = rs
-        elif cfg.scale == scale:
-            by_key[(cfg.rule, cfg.lam, (cfg.bits, cfg.rounding))] = rs
-    cols = ["fp32", *PRECISIONS]
-    names = ["fp32"] + [f"int{b} {rd}" for b, rd in PRECISIONS]
+        if cfg.bits is None or cfg.scale == scale:
+            by_key[(cfg.rule, cfg.lam, series_key(cfg))] = rs
+    cols, names = TABLE_COLS, TABLE_NAMES
 
     def cell(rs):
         rec = np.array([r.recalled for r in rs])
@@ -142,10 +164,9 @@ def plot_curves(series, lams, *, xlabel: str, ylabel: str, title: str, path: Pat
     fig, axes = plt.subplots(len(RULES), len(lams), figsize=(3.1 * len(lams), 5.6), sharex=True, sharey=True,
                              facecolor=SURFACE, squeeze=False)
     for cfg, x, mean, std in series:
-        key = "fp32" if cfg.bits is None else (cfg.bits, cfg.rounding)
+        key = series_key(cfg)
         ax = axes[RULES.index(cfg.rule)][lams.index(cfg.lam)]
-        label = "fp32 (reference)" if key == "fp32" else f"int{cfg.bits}, {cfg.rounding} rounding"
-        ax.plot(x, mean, lw=1.5, label=label, **STYLE[key])
+        ax.plot(x, mean, lw=1.5, label=series_label(cfg), **STYLE[key])
         if std is not None:
             ax.fill_between(x, mean - std, mean + std, color=STYLE[key]["color"], alpha=0.12, lw=0)
 

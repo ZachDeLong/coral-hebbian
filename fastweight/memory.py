@@ -27,12 +27,15 @@ class MemoryConfig:
     rule: str = "hebbian"  # "hebbian" | "delta"
     lam: float = 0.99  # decay per step
     beta: float = 1.0  # write strength
-    bits: int | None = None  # None = float32 reference
+    bits: int | None = None  # None = float storage (see float_format)
     rounding: str = "nearest"  # "nearest" | "stochastic"
     scale: str = "static"  # "static" (per tensor, fixed at compile time) | "static_row" | "dynamic"
+    float_format: str | None = None  # with bits=None: None = float32 reference, "bf16" = bfloat16 storage
 
     @property
     def label(self) -> str:
+        if self.float_format:
+            return self.float_format
         if self.bits is None:
             return "fp32"
         return f"int{self.bits}-{self.rounding}-{self.scale}"
@@ -93,6 +96,12 @@ class FastWeightMemory:
         cfg = self.cfg
         S_new = update(self.S, k, v, cfg.rule, cfg.lam, cfg.beta)
         if cfg.bits is None:
+            if cfg.float_format == "bf16":
+                # Round-to-nearest-even to bfloat16 (8 significant bits), as a bf16 state tensor would be stored.
+                S_new = S_new.to(torch.bfloat16).float()
+                self._unchanged += (S_new == self.S).float().mean().item()
+            elif cfg.float_format is not None:
+                raise ValueError(f"unknown float format: {cfg.float_format}")
             self.S = S_new
             self.amax_row = torch.maximum(self.amax_row, S_new.abs().amax(dim=(0, 2)))
         else:
