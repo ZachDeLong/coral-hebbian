@@ -123,20 +123,31 @@ def print_table(groups, scale: str, lams, n_seeds: int):
 
 
 def plot(groups, scale: str, lams, task: RecallTask, n_seeds: int, path: Path):
-    fig, axes = plt.subplots(len(RULES), len(lams), figsize=(3.1 * len(lams), 5.6), sharex=True, sharey=True,
-                             facecolor=SURFACE)
     ages = np.arange(task.T) + 1
+    series = []
     for cfg, rs in groups.items():
         if cfg.bits is not None and cfg.scale != scale:
             continue
+        accs = np.stack([r.acc_by_age for r in rs])
+        series.append((cfg, ages, accs.mean(0), accs.std(0) if n_seeds > 1 else None))
+    seeds_note = f"{n_seeds} seeds × {task.batch} trials, band = ±1 std across seeds" if n_seeds > 1 \
+        else f"{task.batch} trials"
+    plot_curves(series, lams, xlabel="age (writes since stored)", ylabel="recall accuracy", path=path,
+                title=f"Forgetting curves, state stored with {scale} scale  (d={task.d}, vocab={task.vocab}, "
+                      f"{seeds_note})")
+
+
+def plot_curves(series, lams, *, xlabel: str, ylabel: str, title: str, path: Path):
+    """series: iterable of (cfg, x, mean, std or None). One panel per (rule, lambda), log x."""
+    fig, axes = plt.subplots(len(RULES), len(lams), figsize=(3.1 * len(lams), 5.6), sharex=True, sharey=True,
+                             facecolor=SURFACE, squeeze=False)
+    for cfg, x, mean, std in series:
         key = "fp32" if cfg.bits is None else (cfg.bits, cfg.rounding)
         ax = axes[RULES.index(cfg.rule)][lams.index(cfg.lam)]
         label = "fp32 (reference)" if key == "fp32" else f"int{cfg.bits}, {cfg.rounding} rounding"
-        accs = np.stack([r.acc_by_age for r in rs])
-        mean, std = accs.mean(0), accs.std(0)
-        ax.plot(ages, mean, lw=1.5, label=label, **STYLE[key])
-        if n_seeds > 1:
-            ax.fill_between(ages, mean - std, mean + std, color=STYLE[key]["color"], alpha=0.12, lw=0)
+        ax.plot(x, mean, lw=1.5, label=label, **STYLE[key])
+        if std is not None:
+            ax.fill_between(x, mean - std, mean + std, color=STYLE[key]["color"], alpha=0.12, lw=0)
 
     for i, rule in enumerate(RULES):
         for j, lam in enumerate(lams):
@@ -154,18 +165,15 @@ def plot(groups, scale: str, lams, task: RecallTask, n_seeds: int, path: Path):
             if i == 0:
                 ax.set_title(f"λ = {lam}", color=INK_2, fontsize=10)
             if j == 0:
-                ax.set_ylabel(f"{'Hebbian' if rule == 'hebbian' else 'Delta rule'}\nrecall accuracy", color=INK_2,
+                ax.set_ylabel(f"{'Hebbian' if rule == 'hebbian' else 'Delta rule'}\n{ylabel}", color=INK_2,
                               fontsize=9)
             if i == len(RULES) - 1:
-                ax.set_xlabel("age (writes since stored)", color=INK_2, fontsize=9)
+                ax.set_xlabel(xlabel, color=INK_2, fontsize=9)
 
     handles, labels = axes[0][0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="upper center", ncol=len(labels), frameon=False, fontsize=9,
                labelcolor=INK_2, bbox_to_anchor=(0.5, 1.0))
-    seeds_note = f"{n_seeds} seeds × {task.batch} trials, band = ±1 std across seeds" if n_seeds > 1 \
-        else f"{task.batch} trials"
-    fig.suptitle(f"Forgetting curves, state stored with {scale} scale  (d={task.d}, vocab={task.vocab}, "
-                 f"{seeds_note})", color=INK_2, fontsize=10, y=0.945)
+    fig.suptitle(title, color=INK_2, fontsize=10, y=0.945)
     fig.tight_layout(rect=(0, 0, 1, 0.92))
     fig.savefig(path, dpi=150, facecolor=SURFACE)
     plt.close(fig)

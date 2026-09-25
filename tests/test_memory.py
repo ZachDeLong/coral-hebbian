@@ -1,6 +1,17 @@
+import numpy as np
 import torch
 
-from fastweight import FastWeightMemory, MemoryConfig, RecallTask, calibrate, quantize, run_recall, update
+from fastweight import (
+    FastWeightMemory,
+    MemoryConfig,
+    RebindTask,
+    RecallTask,
+    calibrate,
+    quantize,
+    run_rebind,
+    run_recall,
+    update,
+)
 
 
 def _decay_once(codes: torch.Tensor, lam: float, mode: str, gen=None) -> torch.Tensor:
@@ -64,6 +75,24 @@ def test_recall_runs_for_every_scale_mode():
         res = run_recall(MemoryConfig(bits=8, scale=scale), task, static_range=rng)
         assert 0.0 <= res.recalled <= 32
         assert res.write_lsb > 0
+
+
+def test_rebind_scoring_current_and_stale():
+    from fastweight.rebind import score
+
+    # One batch, two keys. Key 0 bound to 5 then 7; key 1 bound to 3 only.
+    key_idx = np.array([[0, 1, 0]])
+    ids = np.array([[5, 3, 7]])
+    age, current, stale = score(np.array([[5, 3]]), key_idx, ids, T=3)
+    assert age.tolist() == [0, 1]
+    assert current.tolist() == [False, True]  # key 0 answered its old value
+    assert stale.tolist() == [True, False]
+
+
+def test_delta_rule_rebinds_orthogonal_keys_in_float():
+    task = RebindTask(d=32, pool=8, T=64, vocab=32, batch=4)
+    res = run_rebind(MemoryConfig(rule="delta", lam=1.0), task)
+    assert res.current_acc > 0.9 and res.stale_rate < 0.1
 
 
 def test_write_size_shrinks_with_fewer_bits():

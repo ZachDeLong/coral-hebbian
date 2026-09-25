@@ -69,14 +69,21 @@ def make_stream(task: RecallTask, seed: int):
     return keys, ids, codebook
 
 
-def _stream_through(cfg: MemoryConfig, task: RecallTask, seed: int, static_range=None) -> FastWeightMemory:
-    keys, ids, codebook = make_stream(task, seed)
-    values = codebook[ids]
-    rounding_gen = torch.Generator().manual_seed(seed + 1)
-    mem = FastWeightMemory(cfg, task.batch, task.d, static_range=static_range, generator=rounding_gen)
-    for t in range(task.T):
+def stream_through(
+    cfg: MemoryConfig, keys: torch.Tensor, values: torch.Tensor, rounding_seed: int, static_range=None
+) -> FastWeightMemory:
+    """Write keys[:, t] -> values[:, t] for every t. keys, values: (B, T, d)."""
+    batch, T, d = keys.shape
+    rounding_gen = torch.Generator().manual_seed(rounding_seed)
+    mem = FastWeightMemory(cfg, batch, d, static_range=static_range, generator=rounding_gen)
+    for t in range(T):
         mem.write(keys[:, t], values[:, t])
     return mem
+
+
+def _stream_through(cfg: MemoryConfig, task: RecallTask, seed: int, static_range=None) -> FastWeightMemory:
+    keys, ids, codebook = make_stream(task, seed)
+    return stream_through(cfg, keys, codebook[ids], seed + 1, static_range)
 
 
 def calibrate(cfg: MemoryConfig, task: RecallTask) -> torch.Tensor:
